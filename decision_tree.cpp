@@ -17,6 +17,7 @@ struct Split
     double informationGain{0};
     Subsets childs;
     double threshold = 0;
+    bool isNumerical {false};
 };
 struct Node
 {
@@ -175,21 +176,11 @@ private:
         }
         return values;
     }
-    std::vector<double> toNumericValues(std::set<InputType> &values)
-    {
-        std::vector<double> result;
-        for (auto val : values)
-        {
-            result.push_back(utils::toNumber<double>(val));
-        }
-        std::sort(result.begin(), result.end());
-        return result;
-    }
     Split getBestSplit(DataSet &dataSet)
     {
         Split bestSplit;
-        double maxGain = float(INT_MIN);
-        auto getSplit = [&maxGain, &bestSplit](Subsets &childs, double gain, size_t featureIdx, double threshold)
+        double maxGain = std::numeric_limits<double>::min();
+        auto getSplit = [&maxGain, &bestSplit](Subsets &childs, double gain, size_t featureIdx, double threshold, bool isNumerical)
         {
             if (gain > maxGain)
             {
@@ -197,6 +188,7 @@ private:
                 bestSplit.featureIdx = featureIdx;
                 bestSplit.childs = std::move(childs);
                 bestSplit.threshold = threshold;
+                bestSplit.isNumerical = isNumerical;
                 maxGain = gain;
             }
         };
@@ -204,40 +196,44 @@ private:
         for (size_t featureIdx = 0; featureIdx < classIndex; featureIdx++)
         {
             double gain = 0;
-
             if (colsInfo[featureIdx].isNumerical)
             {
                 std::sort(dataSet.begin(), dataSet.end(), [featureIdx] (auto &r1, auto &r2)
                 {
                     return utils::toNumber<double>(r1[featureIdx]) < utils::toNumber<double>(r2[featureIdx]);
                 });
-                std::deque<Row> leftSet;
-                std::deque<Row> rightSet;
+                std::map<InputType, int> rightClasses;
+                std::map<InputType, int> leftClasses;
+                size_t leftSize = 0;
+                size_t rightSize = dataSet.size();
                 for (size_t i = 0; i < dataSet.size(); i++)
                 {
-                    rightSet.push_back(dataSet[i]);
+                    rightClasses[dataSet[i][classIndex]]++;
                 }
                 for (size_t i = 0; i < dataSet.size() - 1; i++)
                 {
-                    if (dataSet[i][featureIdx] != dataSet[i + 1][featureIdx])
+                    auto &row     = dataSet[i];
+                    auto &nextRow = dataSet[i + 1];
+                    if (row[featureIdx] != nextRow[featureIdx])
                     {
-                        double v1 = utils::toNumber<double>(dataSet[i][featureIdx]);
-                        double v2 = utils::toNumber<double>(dataSet[i + 1][featureIdx]);
+                        double v1 = utils::toNumber<double>(row[featureIdx]);
+                        double v2 = utils::toNumber<double>(nextRow[featureIdx]);
                         double threshold = (v1 + v2) / 2;
-                        leftSet.push_back(dataSet[i]);
-                        rightSet.pop_front();
+                        leftSize++;
+                        rightSize--;
+                        leftClasses[row[classIndex]]++;
+                        rightClasses[row[classIndex]]--;
                         Subsets childs;
-                        std::vector<Row> left(leftSet.begin(), leftSet.end());
-                        std::vector<Row> right(rightSet.begin(), rightSet.end());
-                        childs["<"] = std::move(left);
-                        childs[">="] = std::move(right);
-                        gain = informationGain(dataSet.size(), parentSetImpurity, childs, ImpurityCriteria::GiniIndex) / splitInfo(dataSet, childs);
-                        getSplit(childs, gain, featureIdx, threshold);
+                        gain = informationGain(dataSet.size(), parentSetImpurity, leftClasses,
+                        rightClasses, leftSize, rightSize) / splitInfo(dataSet.size(), leftSize, rightSize);
+                        getSplit(childs, gain, featureIdx, threshold, true);
                     }
                     else
                     {
-                        leftSet.push_back(dataSet[i]);
-                        rightSet.pop_front();
+                        leftClasses[row[classIndex]]++;
+                        rightClasses[row[classIndex]]--;
+                        leftSize++;
+                        rightSize--;
                     }
                 }
             }
@@ -245,27 +241,57 @@ private:
             {
                 auto uniqueValues = getUniqueFeatureValues(dataSet, featureIdx);
                 Subsets childs = split(dataSet, featureIdx, uniqueValues);
-                gain = informationGain(dataSet.size(), parentSetImpurity, childs, ImpurityCriteria::GiniIndex) / splitInfo(dataSet, childs);
-                getSplit(childs, gain, featureIdx, 0);
+                gain = informationGain(dataSet.size(), parentSetImpurity, childs) / splitInfo(dataSet, childs);
+                getSplit(childs, gain, featureIdx, 0, false);
             }
         }
-
+        if (bestSplit.isNumerical)
+        {
+            bestSplit.childs = splitNumeric(dataSet, bestSplit.featureIdx, bestSplit.threshold);
+        }
         return bestSplit;
     }
-    double informationGain(size_t parentSize, double parentSetImpurity, Subsets &subsets, ImpurityCriteria mode = ImpurityCriteria::Entropy)
+    Subsets splitNumeric(DataSet& dataSet, size_t featureIdx, double threshold)
+    {
+        Subsets result;
+        for (auto& row : dataSet)
+        {
+            auto value = utils::toNumber<double>(row[featureIdx]);
+            if (value < threshold)
+            {
+                result["<"].push_back(row);
+            }
+            else
+            {
+                result[">="].push_back(row);
+            }
+        }
+        return result;
+    }
+    double gini(std::map<InputType, int> &classes, size_t dataSetSize)
+    {
+        double result = 0;
+        for (auto &cl : classes)
+        {
+            double p = double(cl.second) / double(dataSetSize);
+            result += p * p;
+        }
+        return 1 - result;
+    }
+    double informationGain(size_t parentSize, double parentSetImpurity, std::map<InputType, int> &leftClasses, 
+    std::map<InputType, int> &rightClasses, size_t leftSize, size_t rightSize)
+    {
+       double ig = gini(leftClasses, leftSize) * double(leftSize) / double(parentSize) + 
+       gini(rightClasses, rightSize) * double(rightSize) / double(parentSize);
+       return parentSetImpurity - ig;
+    }
+    double informationGain(size_t parentSize, double parentSetImpurity, Subsets &subsets)
     {
         double ig = 0;
         for (auto &subset : subsets)
         {
             double pr = double(subset.second.size()) / double(parentSize);
-            if (mode == ImpurityCriteria::Entropy)
-            {
-                ig += entropy(subset.second) * pr;
-            }
-            else if (mode == ImpurityCriteria::GiniIndex)
-            {
-                ig += gini(subset.second) * pr;
-            }
+            ig += gini(subset.second) * pr;
         }
        return parentSetImpurity - ig;
     }
@@ -284,6 +310,15 @@ private:
             }
         }
         return result;
+    }
+    double splitInfo(size_t parentSize, size_t leftSize, size_t rightSize)
+    {
+        double splitInfo = 0;
+        double pr = double(leftSize) / double(parentSize);
+        splitInfo += pr * std::log2(pr);
+        pr = double(rightSize) / double(parentSize);
+        splitInfo += pr * std::log2(pr);
+        return -splitInfo;
     }
     double splitInfo(DataSet &parentSet, Subsets &subsets)
     {
@@ -334,9 +369,9 @@ private:
 };
 
 int main()
-{
+{  
     std::vector<std::string> colNames;
-    auto pathToCsv = "drug200.csv";
+    auto pathToCsv = "diabetes_dataset.csv";
     DataSet dataSet;
     auto colsInfo = utils::readFromCSV(dataSet, pathToCsv);
     auto [train, test] = utils::splitTrainTest(dataSet, 0.25, 1230);
