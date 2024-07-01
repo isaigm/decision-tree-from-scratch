@@ -19,5 +19,5 @@ Success ratio: 0.765625
                 |__ BMI>=46.100000 -> 0
             |__ DiabetesPedigreeFunction>=2.233000 -> 0
 ```
-The building tooks around 0.8 seconds for this dataset:
+The building process took around ~0.8~ 0.08 seconds using the dataset below and with a i5-11400H cpu:
 https://github.com/Anny8910/Decision-Tree-Classification-on-Diabetes-Dataset/blob/master/diabetes_dataset.csv
