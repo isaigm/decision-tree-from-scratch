@@ -1,6 +1,6 @@
 # Decision trees
 Here I'm implementing C4.5 algorithm to build decision trees without the pruning step using the recursive idea of splitting the dataset and select the best attribute in each level of recursion.
-Here is what it look like the decision tree:
+Here is what the decision tree look like:
 ```.
 Success ratio: 0.765625
 |__ 
@@ -19,5 +19,5 @@ Success ratio: 0.765625
                 |__ BMI>=46.100000 -> 0
             |__ DiabetesPedigreeFunction>=2.233000 -> 0
 ```
-The building tooks around 0.8 seconds for the dataset:
+The building tooks around 0.8 seconds for this dataset:
 https://github.com/Anny8910/Decision-Tree-Classification-on-Diabetes-Dataset/blob/master/diabetes_dataset.csv
