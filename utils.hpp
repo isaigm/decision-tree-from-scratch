@@ -4,10 +4,12 @@
 #include <fstream>
 #include <regex>
 #include <random>
+#include <functional>
 using InputType = std::string;
 using TargetType = std::string;
 using Row = std::vector<InputType>;
-using DataSet = std::vector<Row>;
+using View = std::vector<std::reference_wrapper<Row>>;
+using DataSet =  std::vector<Row>; 
 struct ColInfo
 {
     bool isNumerical{};
@@ -19,15 +21,14 @@ namespace utils
         std::regex pattern("^[-+]?\\d*\\.?\\d+(e[-+]?\\d+)?$");
         return std::regex_match(str, pattern);
     }
-    std::tuple<DataSet, DataSet> splitTrainTest(DataSet &dataSet, float ratio, unsigned int seed)
+    std::tuple<View, View> splitTrainTest(DataSet &dataSet, float ratio, unsigned int seed)
     {
         std::mt19937 rng(seed);
-        // Baraja el vector usando el generador
         std::shuffle(dataSet.begin(), dataSet.end(), rng);
 
-        DataSet train;
-        DataSet test;
-
+        View train;
+        View test;
+        
         int samples = dataSet.size() * ratio;
         for (int i = 0; i < samples; i++)
         {
@@ -40,13 +41,10 @@ namespace utils
         }
         return std::make_tuple(train, test);
     }
-    template<class T>
-    T toNumber(std::string& str)
+    
+    double toNumber(std::string& str)
     {
-        T val;
-        std::stringstream ss(str);
-        ss >> val;
-        return val;
+        return std::stod(str);
     }
     template <class T>
     std::vector<ColInfo> readFromCSV(std::vector<std::vector<T>>& dataSet, std::string path)
