@@ -9,7 +9,7 @@
 #include <deque>
 #include "utils.hpp"
 
-using Subsets = std::map<InputType, DataSet>;
+using Subsets = std::map<InputType, View>;
 
 struct Split
 {
@@ -41,18 +41,18 @@ public:
     TreeClassifier(size_t _maxDepth, size_t _minSampleSplit, std::vector<ColInfo> &&_colsInfo) : maxDepth(_maxDepth), minSampleSplit(_minSampleSplit), colsInfo(_colsInfo)
     {
     }
-    void fit(DataSet &dataSet)
+    void fit(View &dataSet)
     {
-        classIndex = dataSet[0].size() - 1;
+        classIndex = dataSet[0].get().size() - 1;
         root = buildTree(dataSet, 0);
     }
-    void evaluate(DataSet &dataSet)
+    void evaluate(View &dataSet)
     {
         int success = 0;
         for (auto &row : dataSet)
         {
             TargetType p = predict(root, row);
-            if (p == row[classIndex])
+            if (p == row.get()[classIndex])
                 success++;
         }
         std::printf("Success ratio: %f\n", double(success) / double(dataSet.size()));
@@ -106,7 +106,7 @@ private:
         size_t featureIdx = node->featureIdx;
         if (node->isNumerical)
         {
-            double value = utils::toNumber<double>(input[featureIdx]);
+            double value = utils::toNumber(input[featureIdx]);
             std::string key = "";
             if (value < node->threshold)
             {
@@ -121,7 +121,7 @@ private:
         return predict(node->childs[input[node->featureIdx]], input);
     }
 
-    std::shared_ptr<Node> buildTree(DataSet &dataSet, size_t currDepth)
+    std::shared_ptr<Node> buildTree(View &dataSet, size_t currDepth)
     {
         size_t numSamples = dataSet.size();
 
@@ -148,14 +148,14 @@ private:
         node->classPredicted = getLeafValue(dataSet);
         return node;
     }
-    TargetType getLeafValue(DataSet &dataSet)
+    TargetType getLeafValue(View &dataSet)
     {
         int maxCount = INT_MIN;
         TargetType maxClass{};
         std::map<TargetType, int> classes;
         for (auto &row : dataSet)
         {
-            classes[row[classIndex]]++;
+            classes[row.get()[classIndex]]++;
         }
         for (auto cl : classes)
         {
@@ -167,16 +167,16 @@ private:
         }
         return maxClass;
     }
-    std::set<InputType> getUniqueFeatureValues(DataSet &dataSet, size_t featureIdx)
+    std::set<InputType> getUniqueFeatureValues(View &dataSet, size_t featureIdx)
     {
         std::set<InputType> values;
         for (auto &row : dataSet)
         {
-            values.insert(row[featureIdx]);
+            values.insert(row.get()[featureIdx]);
         }
         return values;
     }
-    Split getBestSplit(DataSet &dataSet)
+    Split getBestSplit(View &dataSet)
     {
         Split bestSplit;
         double maxGain = std::numeric_limits<double>::min();
@@ -200,7 +200,7 @@ private:
             {
                 std::sort(dataSet.begin(), dataSet.end(), [featureIdx] (auto &r1, auto &r2)
                 {
-                    return utils::toNumber<double>(r1[featureIdx]) < utils::toNumber<double>(r2[featureIdx]);
+                    return utils::toNumber(r1.get()[featureIdx]) < utils::toNumber(r2.get()[featureIdx]);
                 });
                 std::map<InputType, int> rightClasses;
                 std::map<InputType, int> leftClasses;
@@ -208,21 +208,21 @@ private:
                 size_t rightSize = dataSet.size();
                 for (size_t i = 0; i < dataSet.size(); i++)
                 {
-                    rightClasses[dataSet[i][classIndex]]++;
+                    rightClasses[dataSet[i].get()[classIndex]]++;
                 }
                 for (size_t i = 0; i < dataSet.size() - 1; i++)
                 {
                     auto &row     = dataSet[i];
                     auto &nextRow = dataSet[i + 1];
-                    if (row[featureIdx] != nextRow[featureIdx])
+                    if (row.get()[featureIdx] != nextRow.get()[featureIdx])
                     {
-                        double v1 = utils::toNumber<double>(row[featureIdx]);
-                        double v2 = utils::toNumber<double>(nextRow[featureIdx]);
+                        double v1 = utils::toNumber(row.get()[featureIdx]);
+                        double v2 = utils::toNumber(nextRow.get()[featureIdx]);
                         double threshold = (v1 + v2) / 2;
                         leftSize++;
                         rightSize--;
-                        leftClasses[row[classIndex]]++;
-                        rightClasses[row[classIndex]]--;
+                        leftClasses[row.get()[classIndex]]++;
+                        rightClasses[row.get()[classIndex]]--;
                         Subsets childs;
                         gain = informationGain(dataSet.size(), parentSetImpurity, leftClasses,
                         rightClasses, leftSize, rightSize) / splitInfo(dataSet.size(), leftSize, rightSize);
@@ -230,8 +230,8 @@ private:
                     }
                     else
                     {
-                        leftClasses[row[classIndex]]++;
-                        rightClasses[row[classIndex]]--;
+                        leftClasses[row.get()[classIndex]]++;
+                        rightClasses[row.get()[classIndex]]--;
                         leftSize++;
                         rightSize--;
                     }
@@ -251,12 +251,12 @@ private:
         }
         return bestSplit;
     }
-    Subsets splitNumeric(DataSet& dataSet, size_t featureIdx, double threshold)
+    Subsets splitNumeric(View& dataSet, size_t featureIdx, double threshold)
     {
         Subsets result;
         for (auto& row : dataSet)
         {
-            auto value = utils::toNumber<double>(row[featureIdx]);
+            auto value = utils::toNumber(row.get()[featureIdx]);
             if (value < threshold)
             {
                 result["<"].push_back(row);
@@ -295,14 +295,14 @@ private:
         }
        return parentSetImpurity - ig;
     }
-    Subsets split(DataSet &dataSet, size_t featureIdx, std::set<InputType> &values)
+    Subsets split(View &dataSet, size_t featureIdx, std::set<InputType> &values)
     {
         Subsets result;
         for (auto &row : dataSet)
         {
             for (auto &value : values)
             {
-                if (row[featureIdx] == value)
+                if (row.get()[featureIdx] == value)
                 {
                     result[value].push_back(row);
                     break;
@@ -320,7 +320,7 @@ private:
         splitInfo += pr * std::log2(pr);
         return -splitInfo;
     }
-    double splitInfo(DataSet &parentSet, Subsets &subsets)
+    double splitInfo(View &parentSet, Subsets &subsets)
     {
         double splitInfo = 0;
         for (auto &subset : subsets)
@@ -330,16 +330,16 @@ private:
         }
         return -splitInfo;
     }
-    std::map<TargetType, int> countClasses(DataSet &dataSet)
+    std::map<TargetType, int> countClasses(View &dataSet)
     {
         std::map<TargetType, int> classes;
         for (auto &row : dataSet)
         {
-            classes[row[classIndex]]++;
+            classes[row.get()[classIndex]]++;
         }
         return classes;
     }
-    double entropy(DataSet &dataSet)
+    double entropy(View &dataSet)
     {
         auto classes = countClasses(dataSet);
         double result = 0;
@@ -350,7 +350,7 @@ private:
         }
         return -result;
     }
-    double gini(DataSet &dataSet)
+    double gini(View &dataSet)
     {
         auto classes = countClasses(dataSet);
         double result = 0;
@@ -372,9 +372,12 @@ int main()
 {  
     std::vector<std::string> colNames;
     auto pathToCsv = "diabetes_dataset.csv";
-    DataSet dataSet;
+    DataSet  dataSet;
     auto colsInfo = utils::readFromCSV(dataSet, pathToCsv);
+    
     auto [train, test] = utils::splitTrainTest(dataSet, 0.25, 1230);
+    
+    
     TreeClassifier treeClassifier(3, 2, std::move(colsInfo));
     treeClassifier.fit(train);
     treeClassifier.evaluate(test);
