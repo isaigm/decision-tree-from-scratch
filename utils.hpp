@@ -1,10 +1,17 @@
-#pragma once
+
+#ifndef UTILS_HPP
+#define UTILS_HPP
 #include <vector>
 #include <sstream>
 #include <fstream>
 #include <regex>
 #include <random>
 #include <functional>
+#include <string>
+#include <algorithm> 
+#include <stdexcept> 
+#include <tuple>
+
 using InputType = std::string;
 using TargetType = std::string;
 using Row = std::vector<InputType>;
@@ -15,13 +22,21 @@ struct ColInfo
     bool isNumerical{};
     std::string name;
 };
+
 namespace utils
 {
     bool isNumber(const std::string& str) {
-        std::regex pattern("^[-+]?\\d*\\.?\\d+(e[-+]?\\d+)?$");
-        return std::regex_match(str, pattern);
+        try {
+            std::stod(str);
+        } catch (const std::invalid_argument& ia) {
+            return false;
+        } catch (const std::out_of_range& oor) {
+            return false;
+        }
+        return true;
     }
-    std::tuple<View, View> splitTrainTest(DataSet &dataSet, float ratio, unsigned int seed)
+
+    std::tuple<View, View> splitTrainTest(DataSet &dataSet, float testRatio, unsigned int seed)
     {
         std::mt19937 rng(seed);
         std::shuffle(dataSet.begin(), dataSet.end(), rng);
@@ -29,95 +44,88 @@ namespace utils
         View train;
         View test;
         
-        int samples = dataSet.size() * ratio;
-        for (int i = 0; i < samples; i++)
+        int test_samples = dataSet.size() * testRatio;
+        
+        for (int i = 0; i < test_samples; i++)
         {
             test.push_back(dataSet[i]);
-
         }
-        for (int i = samples; i < dataSet.size(); i++)
+        for (int i = test_samples; i < dataSet.size(); i++)
         {
             train.push_back(dataSet[i]);
         }
         return std::make_tuple(train, test);
     }
     
-    double toNumber(std::string& str)
+    double toNumber(const std::string& str)
     {
         return std::stod(str);
     }
-    template <class T>
-    std::vector<ColInfo> readFromCSV(std::vector<std::vector<T>>& dataSet, std::string path)
+
+    std::vector<ColInfo> readFromCSV(DataSet& dataSet, const std::string& path)
     {
-        auto parseLine = [](std::string& line, char sep) -> std::vector<T>
+        auto parseLine = [](const std::string& line, char sep) -> std::vector<std::string>
         {
-                auto parseType = [](std::string& str)
-                {
-                      std::stringstream ss(str);
-                      T val;
-                      ss >> val;
-                      return val;
-                };
                 std::string curr = "";
-                std::vector<T> values;
-                for (size_t i = 0; i < line.size(); i++)
+                std::vector<std::string> values;
+                std::stringstream ss(line);
+                
+                while(std::getline(ss, curr, sep))
                 {
-                    char ch = line[i];
-                    if (curr == "NA")
-                    {
-                        return {};
-                    }
-                    if (ch == sep)
-                    {
-                        values.push_back(parseType(curr));
-                        curr = "";
-                    }
-                    else
-                    {
-                        curr += ch;
-                    }
+                    values.push_back(curr);
                 }
-                values.push_back(parseType(curr));
                 return values;
         };
-        std::string line;
+
         std::ifstream file(path);
-        std::vector<ColInfo> cols;
-        bool seenFirstLine = false;
         if (!file.is_open())
         {
-            throw std::runtime_error("file doesnt exist");
+            throw std::runtime_error("El archivo no existe: " + path);
         }
-        bool processFirstRow = false;
+
+        std::string line;
+        std::vector<ColInfo> cols;
+        
+        if (std::getline(file, line))
+        {
+            auto colNames = parseLine(line, ',');
+            for (const auto& name : colNames)
+            {
+                cols.emplace_back();
+                cols.back().name = name;
+            }
+        }
+
         while (std::getline(file, line))
         {
-            if (!seenFirstLine)
-            {
-                seenFirstLine = true;
-                auto colNames = parseLine(line, ',');
-                for (auto name : colNames)
-                {
-                    cols.emplace_back();
-                    cols.back().name = name;
-                }
-            }
-            else
-            {
-                auto row = parseLine(line, ',');
-                if (!processFirstRow)
-                {
-                    size_t j = 0;
-                    for (auto col : row)
-                    {
-                        cols[j].isNumerical = isNumber(col);
-                        j++;
-                    }
-                    processFirstRow = true;
-                }
-                dataSet.push_back(row);
+            auto row = parseLine(line, ',');
+            if (!row.empty() && row.size() == cols.size()) {
+                 dataSet.push_back(row);
             }
         }
+        
+        file.close();
+
+        if (dataSet.empty()) {
+            return cols;
+        }
+
+        for (size_t j = 0; j < cols.size() - 1; ++j) 
+        {
+            bool all_numeric = true;
+            for (const auto& row : dataSet)
+            {
+                if (!isNumber(row[j]))
+                {
+                    all_numeric = false;
+                    break;
+                }
+            }
+            cols[j].isNumerical = all_numeric;
+        }
+        cols.back().isNumerical = false;
+
         return cols;
     }
 }
-
+#endif // UTILS_HPP
